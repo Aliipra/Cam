@@ -2,30 +2,30 @@
 <html lang="ar">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>تسجيل فيديو من كاميرا الموبايل</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>تسجيل فيديو من الكاميرا الأمامية</title>
   <style>
     body {
+      margin: 0;
       font-family: Arial, sans-serif;
       direction: rtl;
-      margin: 0;
-      padding: 18px;
       background: #f3f5f7;
       color: #111;
+      padding: 16px;
     }
 
     .container {
-      max-width: 560px;
+      max-width: 720px;
       margin: 0 auto;
       background: #fff;
       border-radius: 18px;
-      padding: 18px;
+      padding: 16px;
       box-shadow: 0 6px 24px rgba(0,0,0,.08);
     }
 
     h1 {
+      margin: 0 0 12px;
       font-size: 22px;
-      margin: 0 0 14px;
     }
 
     label {
@@ -57,58 +57,61 @@
       cursor: not-allowed;
     }
 
+    .preview-wrap {
+      margin-top: 14px;
+      width: 100%;
+      background: #000;
+      border-radius: 16px;
+      overflow: hidden;
+      aspect-ratio: 16 / 9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
     video {
       width: 100%;
-      margin-top: 14px;
-      border-radius: 14px;
+      height: 100%;
+      object-fit: contain;
       background: #000;
-      aspect-ratio: 9 / 16;
-      object-fit: cover;
     }
 
     .status {
       margin-top: 12px;
       min-height: 24px;
       font-size: 15px;
+      line-height: 1.6;
     }
 
     .hint {
       margin-top: 10px;
       font-size: 14px;
       color: #4b5563;
-      line-height: 1.6;
-    }
-
-    .row {
-      display: grid;
-      gap: 10px;
+      line-height: 1.7;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>تسجيل فيديو من كاميرا الموبايل</h1>
+    <h1>تسجيل فيديو من الكاميرا الأمامية</h1>
 
-    <div class="row">
-      <div>
-        <label for="videoCount">عدد الفيديوهات</label>
-        <input id="videoCount" type="number" min="1" value="1" />
-      </div>
+    <label for="videoCount">عدد الفيديوهات</label>
+    <input id="videoCount" type="number" min="1" value="1" />
 
-      <div>
-        <label for="videoDuration">مدة كل فيديو بالثواني</label>
-        <input id="videoDuration" type="number" min="1" value="3" />
-      </div>
+    <label for="videoDuration">مدة كل فيديو بالثواني</label>
+    <input id="videoDuration" type="number" min="1" value="3" />
 
-      <button id="startBtn">ابدأ التسجيل</button>
-    </div>
+    <button id="startBtn">ابدأ التسجيل</button>
 
     <div class="status" id="status">جاهز...</div>
 
-    <video id="preview" autoplay playsinline muted></video>
+    <div class="preview-wrap">
+      <video id="preview" autoplay playsinline muted></video>
+    </div>
 
     <div class="hint">
-      ملاحظة: افتح الموقع من Chrome نفسه، واسمح له بالكاميرا والميكروفون من إعدادات الموقع في Android.
+      سيتم استخدام الكاميرا الأمامية، وتظهر المعاينة كاملة بدون قص.  
+      للحصول على أفضل شكل، افتح الصفحة والموبايل بوضع أفقي.
     </div>
   </div>
 
@@ -152,7 +155,7 @@
 
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: { ideal: "environment" }
+          facingMode: { ideal: "user" }   // الكاميرا الأمامية
         },
         audio: true
       });
@@ -172,11 +175,10 @@
       document.body.appendChild(a);
       a.click();
       a.remove();
-
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
-    async function recordOneVideo(index, durationMs) {
+    async function recordOneVideo(index, durationMs, totalCount) {
       return new Promise((resolve, reject) => {
         try {
           const chunks = [];
@@ -200,12 +202,17 @@
             const blob = new Blob(chunks, { type: finalMimeType });
             const ext = finalMimeType.includes("mp4") ? "mp4" : "webm";
 
+            statusEl.textContent = `انتهى تسجيل الفيديو ${index + 1} من ${totalCount}. جاري الحفظ...`;
+            alert(`انتهى تسجيل الفيديو ${index + 1} من ${totalCount}`);
+
             downloadBlob(blob, `video_${index + 1}.${ext}`);
             resolve();
           };
 
+          alert(`سيبدأ تسجيل الفيديو ${index + 1} من ${totalCount} الآن`);
+          statusEl.textContent = `بدأ تسجيل الفيديو ${index + 1} من ${totalCount} لمدة ${durationMs / 1000} ثانية...`;
+
           recorder.start();
-          statusEl.textContent = `جارٍ تسجيل الفيديو ${index + 1}...`;
 
           setTimeout(() => {
             if (recorder.state !== "inactive") {
@@ -235,7 +242,7 @@
       startBtn.disabled = true;
 
       try {
-        statusEl.textContent = "جارٍ فتح الكاميرا...";
+        statusEl.textContent = "جارٍ فتح الكاميرا الأمامية...";
 
         if (!stream) {
           await startCamera();
@@ -244,15 +251,15 @@
         const durationMs = durationSec * 1000;
 
         for (let i = 0; i < count; i++) {
-          statusEl.textContent = `جارٍ تسجيل الفيديو ${i + 1} من ${count} لمدة ${durationSec} ثواني...`;
-          await recordOneVideo(i, durationMs);
+          await recordOneVideo(i, durationMs, count);
 
           if (i < count - 1) {
-            await sleep(500);
+            await sleep(700);
           }
         }
 
         statusEl.textContent = "تم تسجيل جميع الفيديوهات بنجاح.";
+        alert("تم تسجيل جميع الفيديوهات بنجاح.");
       } catch (err) {
         console.error(err);
         statusEl.textContent = `حدث خطأ: ${err.name || ""} ${err.message || err}`;
