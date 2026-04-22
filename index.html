@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>تسجيل فيديو من كاميرا الموبايل</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      direction: rtl;
+      padding: 20px;
+      background: #f7f7f7;
+    }
+    video {
+      width: 100%;
+      max-width: 420px;
+      border-radius: 12px;
+      background: #000;
+      margin-bottom: 15px;
+    }
+    input, button {
+      padding: 10px;
+      font-size: 16px;
+      margin: 5px 0;
+    }
+    button {
+      cursor: pointer;
+    }
+    .box {
+      background: #fff;
+      padding: 15px;
+      border-radius: 12px;
+      max-width: 500px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="box">
+    <h2>تسجيل فيديو من كاميرا الموبايل</h2>
+
+    <label>عدد الفيديوهات:</label><br>
+    <input type="number" id="videoCount" value="1" min="1" /><br>
+
+    <button onclick="startRecording()">ابدأ التسجيل</button>
+
+    <p id="status">جاهز...</p>
+
+    <video id="preview" autoplay playsinline muted></video>
+  </div>
+
+  <script>
+    let stream;
+    const preview = document.getElementById("preview");
+    const statusText = document.getElementById("status");
+
+    async function startCamera() {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" }, // الكاميرا الخلفية
+        audio: true
+      });
+      preview.srcObject = stream;
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function recordSingleVideo(index) {
+      return new Promise((resolve, reject) => {
+        try {
+          const chunks = [];
+          const mediaRecorder = new MediaRecorder(stream, {
+            mimeType: "video/webm"
+          });
+
+          mediaRecorder.ondataavailable = e => {
+            if (e.data.size > 0) chunks.push(e.data);
+          };
+
+          mediaRecorder.onstop = () => {
+            const blob = new Blob(chunks, { type: "video/webm" });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `video_${index + 1}.webm`;
+            a.click();
+
+            URL.revokeObjectURL(url);
+            resolve();
+          };
+
+          mediaRecorder.start();
+          statusText.textContent = `جارٍ تسجيل الفيديو ${index + 1} لمدة 3 ثواني...`;
+
+          setTimeout(() => {
+            mediaRecorder.stop();
+          }, 3000);
+
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }
+
+    async function startRecording() {
+      const count = parseInt(document.getElementById("videoCount").value);
+
+      if (!count || count < 1) {
+        alert("أدخل عددًا صحيحًا أكبر من 0");
+        return;
+      }
+
+      statusText.textContent = "جارٍ تشغيل الكاميرا...";
+      if (!stream) {
+        try {
+          await startCamera();
+        } catch (err) {
+          alert("تعذر فتح الكاميرا: " + err.message);
+          return;
+        }
+      }
+
+      for (let i = 0; i < count; i++) {
+        await recordSingleVideo(i);
+        await sleep(500); // فاصل بسيط بين المقاطع، ويمكن تغييره أو حذفه
+      }
+
+      statusText.textContent = "تم تسجيل جميع الفيديوهات.";
+    }
+  </script>
+</body>
+</html>
