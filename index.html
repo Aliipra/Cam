@@ -3,19 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>تسجيل فيديو من الكاميرا الأمامية</title>
+  <title>تسجيل فيديو أفقي من الكاميرا الأمامية</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
   <style>
     body {
       margin: 0;
+      padding: 16px;
       font-family: Arial, sans-serif;
       direction: rtl;
       background: #f3f5f7;
       color: #111;
-      padding: 16px;
     }
 
     .container {
-      max-width: 720px;
+      max-width: 900px;
       margin: 0 auto;
       background: #fff;
       border-radius: 18px;
@@ -24,7 +27,7 @@
     }
 
     h1 {
-      margin: 0 0 12px;
+      margin: 0 0 14px;
       font-size: 22px;
     }
 
@@ -52,27 +55,29 @@
       cursor: pointer;
     }
 
+    button.secondary {
+      background: #0f766e;
+    }
+
     button:disabled {
-      opacity: .6;
+      opacity: .65;
       cursor: not-allowed;
     }
 
     .preview-wrap {
       margin-top: 14px;
       width: 100%;
+      aspect-ratio: 16 / 9;
       background: #000;
       border-radius: 16px;
       overflow: hidden;
-      aspect-ratio: 16 / 9;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      position: relative;
     }
 
-    video {
+    canvas {
       width: 100%;
       height: 100%;
-      object-fit: contain;
+      display: block;
       background: #000;
     }
 
@@ -89,11 +94,78 @@
       color: #4b5563;
       line-height: 1.7;
     }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(17, 24, 39, .95);
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 999px;
+      font-size: 14px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .25s ease, transform .25s ease;
+      z-index: 9999;
+      max-width: calc(100vw - 24px);
+      text-align: center;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .videos {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 12px;
+      background: #fafafa;
+    }
+
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+    }
+
+    .card video {
+      width: 100%;
+      border-radius: 12px;
+      background: #000;
+      aspect-ratio: 16 / 9;
+      object-fit: contain;
+    }
+
+    .card a, .card button {
+      display: inline-block;
+      width: 100%;
+      margin-top: 10px;
+      text-align: center;
+      text-decoration: none;
+    }
+
+    video.hidden-source {
+      position: absolute;
+      left: -9999px;
+      top: -9999px;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>تسجيل فيديو من الكاميرا الأمامية</h1>
+    <h1>تسجيل فيديو أفقي من الكاميرا الأمامية</h1>
 
     <label for="videoCount">عدد الفيديوهات</label>
     <input id="videoCount" type="number" min="1" value="1" />
@@ -101,31 +173,61 @@
     <label for="videoDuration">مدة كل فيديو بالثواني</label>
     <input id="videoDuration" type="number" min="1" value="3" />
 
+    <label for="gapSeconds">الفاصل بين كل فيديو وآخر (1 أو 2 ثانية)</label>
+    <input id="gapSeconds" type="number" min="1" max="2" step="1" value="1" />
+
     <button id="startBtn">ابدأ التسجيل</button>
+    <button id="downloadAllBtn" class="secondary" disabled>تحميل جميع الفيديوهات ZIP</button>
 
     <div class="status" id="status">جاهز...</div>
 
     <div class="preview-wrap">
-      <video id="preview" autoplay playsinline muted></video>
+      <canvas id="previewCanvas" width="1280" height="720"></canvas>
     </div>
 
     <div class="hint">
-      سيتم استخدام الكاميرا الأمامية، وتظهر المعاينة كاملة بدون قص.  
-      للحصول على أفضل شكل، افتح الصفحة والموبايل بوضع أفقي.
+      المعاينة والتسجيل أفقيان دائمًا.  
+      كل فيديو يُحفظ داخل الصفحة أولًا، ثم يمكنك تحميله منفردًا أو تحميل الجميع دفعة واحدة.
     </div>
+
+    <div class="videos" id="videosList"></div>
   </div>
 
+  <div id="toast" class="toast"></div>
+  <video id="sourceVideo" class="hidden-source" playsinline autoplay muted></video>
+
   <script>
-    const preview = document.getElementById("preview");
-    const statusEl = document.getElementById("status");
+    const previewCanvas = document.getElementById("previewCanvas");
+    const ctx = previewCanvas.getContext("2d");
+    const sourceVideo = document.getElementById("sourceVideo");
     const startBtn = document.getElementById("startBtn");
+    const downloadAllBtn = document.getElementById("downloadAllBtn");
+    const statusEl = document.getElementById("status");
+    const videosList = document.getElementById("videosList");
     const videoCountInput = document.getElementById("videoCount");
     const videoDurationInput = document.getElementById("videoDuration");
+    const gapSecondsInput = document.getElementById("gapSeconds");
+    const toastEl = document.getElementById("toast");
 
     let stream = null;
+    let canvasStream = null;
+    let recordingStream = null;
+    let renderRunning = false;
+    let toastTimer = null;
+    let recordings = [];
 
     function sleep(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function showToast(message, duration = 1400) {
+      toastEl.textContent = message;
+      toastEl.classList.add("show");
+
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toastEl.classList.remove("show");
+      }, duration);
     }
 
     function pickMimeType() {
@@ -144,7 +246,6 @@
           return type;
         }
       }
-
       return "";
     }
 
@@ -155,16 +256,78 @@
 
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: { ideal: "user" }   // الكاميرا الأمامية
+          facingMode: { ideal: "user" }
         },
         audio: true
       });
 
-      preview.srcObject = stream;
+      sourceVideo.srcObject = stream;
 
       try {
-        await preview.play();
+        await sourceVideo.play();
       } catch (_) {}
+    }
+
+    function startRenderLoop() {
+      if (renderRunning) return;
+      renderRunning = true;
+
+      const draw = () => {
+        const cw = previewCanvas.width;
+        const ch = previewCanvas.height;
+
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, cw, ch);
+
+        if (sourceVideo.readyState >= 2 && sourceVideo.videoWidth && sourceVideo.videoHeight) {
+          const vw = sourceVideo.videoWidth;
+          const vh = sourceVideo.videoHeight;
+
+          if (vh > vw) {
+            const scale = Math.min(cw / vh, ch / vw);
+
+            ctx.save();
+            ctx.translate(cw / 2, ch / 2);
+            ctx.rotate(-Math.PI / 2);
+
+            ctx.drawImage(
+              sourceVideo,
+              -vw * scale / 2,
+              -vh * scale / 2,
+              vw * scale,
+              vh * scale
+            );
+
+            ctx.restore();
+          } else {
+            const scale = Math.min(cw / vw, ch / vh);
+            const dw = vw * scale;
+            const dh = vh * scale;
+            const dx = (cw - dw) / 2;
+            const dy = (ch - dh) / 2;
+
+            ctx.drawImage(sourceVideo, dx, dy, dw, dh);
+          }
+        }
+
+        requestAnimationFrame(draw);
+      };
+
+      requestAnimationFrame(draw);
+    }
+
+    function getCanvasStream() {
+      if (!canvasStream) {
+        canvasStream = previewCanvas.captureStream(30);
+      }
+      return canvasStream;
+    }
+
+    function getRecordingStream() {
+      const canvasTracks = getCanvasStream().getVideoTracks();
+      const audioTracks = stream ? stream.getAudioTracks() : [];
+      recordingStream = new MediaStream([...canvasTracks, ...audioTracks]);
+      return recordingStream;
     }
 
     function downloadBlob(blob, filename) {
@@ -178,14 +341,47 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
-    async function recordOneVideo(index, durationMs, totalCount) {
+    function addRecordingToPage(blob, filename, mimeType) {
+      const url = URL.createObjectURL(blob);
+
+      const card = document.createElement("div");
+      card.className = "card";
+
+      const title = document.createElement("h3");
+      title.textContent = filename;
+
+      const video = document.createElement("video");
+      video.controls = true;
+      video.src = url;
+
+      const downloadBtn = document.createElement("a");
+      downloadBtn.href = url;
+      downloadBtn.download = filename;
+      downloadBtn.textContent = "تحميل هذا الفيديو";
+
+      card.appendChild(title);
+      card.appendChild(video);
+      card.appendChild(downloadBtn);
+
+      videosList.appendChild(card);
+
+      recordings.push({
+        blob,
+        filename,
+        mimeType,
+        url
+      });
+
+      downloadAllBtn.disabled = recordings.length === 0;
+    }
+
+    async function recordOneVideo(index, totalCount, durationMs) {
       return new Promise((resolve, reject) => {
         try {
           const chunks = [];
           const mimeType = pickMimeType();
           const options = mimeType ? { mimeType } : undefined;
-
-          const recorder = new MediaRecorder(stream, options);
+          const recorder = new MediaRecorder(getRecordingStream(), options);
 
           recorder.ondataavailable = (event) => {
             if (event.data && event.data.size > 0) {
@@ -201,16 +397,17 @@
             const finalMimeType = mimeType || recorder.mimeType || "video/webm";
             const blob = new Blob(chunks, { type: finalMimeType });
             const ext = finalMimeType.includes("mp4") ? "mp4" : "webm";
+            const filename = `video_${index + 1}.${ext}`;
 
-            statusEl.textContent = `انتهى تسجيل الفيديو ${index + 1} من ${totalCount}. جاري الحفظ...`;
-            alert(`انتهى تسجيل الفيديو ${index + 1} من ${totalCount}`);
+            statusEl.textContent = `انتهى تسجيل الفيديو ${index + 1} من ${totalCount}، تم حفظه داخل الصفحة.`;
+            showToast(`انتهى تسجيل الفيديو ${index + 1} من ${totalCount}`);
 
-            downloadBlob(blob, `video_${index + 1}.${ext}`);
+            addRecordingToPage(blob, filename, finalMimeType);
             resolve();
           };
 
-          alert(`سيبدأ تسجيل الفيديو ${index + 1} من ${totalCount} الآن`);
           statusEl.textContent = `بدأ تسجيل الفيديو ${index + 1} من ${totalCount} لمدة ${durationMs / 1000} ثانية...`;
+          showToast(`بدأ تسجيل الفيديو ${index + 1} من ${totalCount}`);
 
           recorder.start();
 
@@ -225,45 +422,97 @@
       });
     }
 
+    downloadAllBtn.addEventListener("click", async () => {
+      if (!recordings.length) return;
+
+      try {
+        if (!window.JSZip) {
+          showToast("تعذر إنشاء ZIP لأن المكتبة لم تُحمّل.");
+          return;
+        }
+
+        startBtn.disabled = true;
+        downloadAllBtn.disabled = true;
+        statusEl.textContent = "جارٍ تجهيز ملف ZIP لجميع الفيديوهات...";
+        showToast("جارٍ تجهيز ملف ZIP...");
+
+        const zip = new JSZip();
+        const folder = zip.folder("videos");
+
+        for (const item of recordings) {
+          folder.file(item.filename, item.blob);
+        }
+
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        downloadBlob(zipBlob, "all_videos.zip");
+
+        statusEl.textContent = "تم تحميل جميع الفيديوهات بنجاح.";
+        showToast("تم تحميل جميع الفيديوهات");
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = `حدث خطأ أثناء إنشاء ZIP: ${err.message || err}`;
+        showToast(`حدث خطأ: ${err.message || err}`, 2500);
+      } finally {
+        startBtn.disabled = false;
+        downloadAllBtn.disabled = recordings.length === 0;
+      }
+    });
+
     startBtn.addEventListener("click", async () => {
       const count = parseInt(videoCountInput.value, 10);
       const durationSec = parseInt(videoDurationInput.value, 10);
+      const gapSec = parseInt(gapSecondsInput.value, 10);
 
       if (!count || count < 1) {
-        alert("أدخل عددًا صحيحًا أكبر من 0");
+        showToast("أدخل عددًا صحيحًا أكبر من 0");
         return;
       }
 
       if (!durationSec || durationSec < 1) {
-        alert("أدخل مدة صحيحة أكبر من 0");
+        showToast("أدخل مدة صحيحة أكبر من 0");
         return;
       }
 
+      if (gapSec !== 1 && gapSec !== 2) {
+        showToast("الفاصل يجب أن يكون 1 أو 2 ثانية");
+        return;
+      }
+
+      recordings = [];
+      videosList.innerHTML = "";
+      downloadAllBtn.disabled = true;
       startBtn.disabled = true;
 
       try {
         statusEl.textContent = "جارٍ فتح الكاميرا الأمامية...";
+        showToast("جارٍ فتح الكاميرا...");
 
         if (!stream) {
           await startCamera();
+          startRenderLoop();
         }
 
         const durationMs = durationSec * 1000;
+        const gapMs = gapSec * 1000;
 
         for (let i = 0; i < count; i++) {
-          await recordOneVideo(i, durationMs, count);
+          await recordOneVideo(i, count, durationMs);
 
           if (i < count - 1) {
-            await sleep(700);
+            statusEl.textContent = `فاصل ${gapSec} ثانية قبل الفيديو التالي...`;
+            showToast(`فاصل ${gapSec} ثانية`);
+            await sleep(gapMs);
           }
         }
 
-        statusEl.textContent = "تم تسجيل جميع الفيديوهات بنجاح.";
-        alert("تم تسجيل جميع الفيديوهات بنجاح.");
+        statusEl.textContent = "تم تسجيل جميع الفيديوهات وحفظها داخل الصفحة.";
+        showToast("تم تسجيل جميع الفيديوهات");
+        downloadAllBtn.disabled = recordings.length === 0;
       } catch (err) {
         console.error(err);
-        statusEl.textContent = `حدث خطأ: ${err.name || ""} ${err.message || err}`;
-        alert(`${err.name || "Error"}: ${err.message || err}`);
+        const msg = `${err.name || "Error"}: ${err.message || err}`;
+        statusEl.textContent = `حدث خطأ: ${msg}`;
+        showToast(msg, 2500);
       } finally {
         startBtn.disabled = false;
       }
