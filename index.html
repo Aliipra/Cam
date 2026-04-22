@@ -193,7 +193,7 @@
 
     <div class="hint">
       المعاينة والتسجيل أفقيان دائمًا.  
-      كل فيديو يُحفظ داخل الصفحة أولًا بصيغة MP4، ثم يمكنك تحميله منفردًا أو تحميل الجميع دفعة واحدة.
+      يتم التسجيل أولًا ثم التحويل إلى MP4 داخل الصفحة، وبعدها يمكنك تحميل كل فيديو أو تحميل الجميع دفعة واحدة.
     </div>
 
     <div class="videos" id="videosList"></div>
@@ -225,7 +225,6 @@
 
     let stream = null;
     let canvasStream = null;
-    let recordingStream = null;
     let renderRunning = false;
     let toastTimer = null;
     let recordings = [];
@@ -237,7 +236,6 @@
     function showToast(message, duration = 1400) {
       toastEl.textContent = message;
       toastEl.classList.add("show");
-
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => {
         toastEl.classList.remove("show");
@@ -246,18 +244,14 @@
 
     function pickMimeType() {
       if (!window.MediaRecorder) return "";
-
       const types = [
         "video/webm;codecs=vp9,opus",
         "video/webm;codecs=vp8,opus",
-        "video/webm",
-        "video/mp4"
+        "video/webm"
       ];
 
       for (const type of types) {
-        if (MediaRecorder.isTypeSupported(type)) {
-          return type;
-        }
+        if (MediaRecorder.isTypeSupported(type)) return type;
       }
       return "";
     }
@@ -266,9 +260,7 @@
       if (ffmpegLoaded) return;
 
       if (!ffmpegLogAttached) {
-        ffmpeg.on("log", ({ message }) => {
-          console.log(message);
-        });
+        ffmpeg.on("log", ({ message }) => console.log(message));
         ffmpegLogAttached = true;
       }
 
@@ -286,27 +278,28 @@
     }
 
     async function startCamera() {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("المتصفح لا يدعم الوصول إلى الكاميرا.");
       }
 
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "user" }
-          },
+          video: { facingMode: { ideal: "user" } },
           audio: true
         });
       } catch (err) {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "user" }
-          },
+          video: { facingMode: { ideal: "user" } },
           audio: false
         });
       }
 
       sourceVideo.srcObject = stream;
+
+      await new Promise((resolve) => {
+        if (sourceVideo.readyState >= 1) return resolve();
+        sourceVideo.onloadedmetadata = () => resolve();
+      });
 
       try {
         await sourceVideo.play();
@@ -330,19 +323,19 @@
 
           if (vh > vw) {
             const scale = Math.min(cw / vh, ch / vw);
+            const drawW = vh * scale;
+            const drawH = vw * scale;
 
             ctx.save();
             ctx.translate(cw / 2, ch / 2);
             ctx.rotate(-Math.PI / 2);
-
             ctx.drawImage(
               sourceVideo,
-              -vw * scale / 2,
-              -vh * scale / 2,
-              vw * scale,
-              vh * scale
+              -drawH / 2,
+              -drawW / 2,
+              drawH,
+              drawW
             );
-
             ctx.restore();
           } else {
             const scale = Math.min(cw / vw, ch / vh);
@@ -350,7 +343,6 @@
             const dh = vh * scale;
             const dx = (cw - dw) / 2;
             const dy = (ch - dh) / 2;
-
             ctx.drawImage(sourceVideo, dx, dy, dw, dh);
           }
         }
@@ -371,8 +363,7 @@
     function getRecordingStream() {
       const canvasTracks = getCanvasStream().getVideoTracks();
       const audioTracks = stream ? stream.getAudioTracks() : [];
-      recordingStream = new MediaStream([...canvasTracks, ...audioTracks]);
-      return recordingStream;
+      return new MediaStream([...canvasTracks, ...audioTracks]);
     }
 
     function downloadBlob(blob, filename) {
@@ -383,7 +374,7 @@
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
     }
 
     function addRecordingToPage(blob, filename) {
@@ -410,12 +401,7 @@
 
       videosList.appendChild(card);
 
-      recordings.push({
-        blob,
-        filename,
-        url
-      });
-
+      recordings.push({ blob, filename, url });
       downloadAllBtn.disabled = recordings.length === 0;
     }
 
@@ -427,24 +413,33 @@
 
       await ffmpeg.writeFile(inputName, await fetchFile(webmBlob));
 
-      await ffmpeg.exec([
-        "-i", inputName,
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        outputFile
-      ]);
+      try {
+        // تحويل مرن: صوت فقط إذا كان موجودًا، وإلا بدون صوت
+        await ffmpeg.exec([
+          "-i", inputName,
+          "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-pix_fmt", "yuv420p",
+          "-movflags", "+faststart",
+          "-c:a", "aac",
+          "-b:a", "128k",
+          outputFile
+        ]);
+      } catch (firstErr) {
+        // محاولة ثانية بدون صوت
+        await ffmpeg.exec([
+          "-i", inputName,
+          "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-pix_fmt", "yuv420p",
+          "-movflags", "+faststart",
+          "-an",
+          outputFile
+        ]);
+      }
 
       const data = await ffmpeg.readFile(outputFile);
-      const mp4Blob = new Blob([data], { type: "video/mp4" });
-
-      return {
-        blob: mp4Blob,
-        filename: outputName
-      };
+      return new Blob([data], { type: "video/mp4" });
     }
 
     async function recordOneVideo(index, totalCount, durationMs) {
@@ -453,6 +448,7 @@
           const chunks = [];
           const mimeType = pickMimeType();
           const options = mimeType ? { mimeType } : undefined;
+
           const recorder = new MediaRecorder(getRecordingStream(), options);
 
           recorder.ondataavailable = (event) => {
@@ -473,15 +469,23 @@
               statusEl.textContent = `جارٍ تحويل الفيديو ${index + 1} من ${totalCount} إلى MP4...`;
               showToast(`جارٍ تحويل الفيديو ${index + 1} إلى MP4`);
 
-              const { blob: mp4Blob, filename } = await convertWebmToMp4(
-                webmBlob,
-                `video_${index + 1}.mp4`
-              );
+              let finalBlob;
+              let finalName = `video_${index + 1}.mp4`;
 
-              statusEl.textContent = `تم حفظ الفيديو ${index + 1} داخل الصفحة بصيغة MP4.`;
+              try {
+                finalBlob = await convertWebmToMp4(webmBlob, finalName);
+              } catch (convertErr) {
+                console.error("FFmpeg conversion failed:", convertErr);
+                finalBlob = webmBlob;
+                finalName = `video_${index + 1}.webm`;
+                statusEl.textContent = `تعذر التحويل إلى MP4، تم حفظ الفيديو بصيغة WebM بدلًا من ذلك.`;
+                showToast("تعذر التحويل إلى MP4، تم الحفظ WebM");
+              }
+
+              statusEl.textContent = `تم حفظ الفيديو ${index + 1} داخل الصفحة.`;
               showToast(`تم حفظ الفيديو ${index + 1}`);
 
-              addRecordingToPage(mp4Blob, filename);
+              addRecordingToPage(finalBlob, finalName);
               resolve();
             } catch (err) {
               reject(err);
@@ -498,6 +502,7 @@
               recorder.stop();
             }
           }, durationMs);
+
         } catch (err) {
           reject(err);
         }
@@ -566,6 +571,14 @@
       startBtn.disabled = true;
 
       try {
+        if (!window.MediaRecorder) {
+          throw new Error("المتصفح لا يدعم MediaRecorder.");
+        }
+
+        if (!HTMLCanvasElement.prototype.captureStream) {
+          throw new Error("المتصفح لا يدعم captureStream على canvas.");
+        }
+
         statusEl.textContent = "جارٍ فتح الكاميرا الأمامية...";
         showToast("جارٍ فتح الكاميرا...");
 
